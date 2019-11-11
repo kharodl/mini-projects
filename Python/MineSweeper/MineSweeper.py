@@ -23,6 +23,7 @@ optional arguments:
 
 import argparse
 import tkinter as tk
+from queue import Queue
 
 
 class GameApp:
@@ -158,17 +159,7 @@ class GameApp:
         """
         x, y = coords
         if not self.end_game:
-            mine_num = 0
-            for dx in (x-1, x, x+1):
-                for dy in (y-1, y, y+1):
-                    if 0 <= dx < self.size and 0 <= dy < self.size \
-                            and (dx, dy) in self.mine_coords:
-                        mine_num += 1
-            self.visited.add(coords)
-            if mine_num == 0:
-                self.c.itemconfigure(self.buttons[x][y], fill='dark gray')
-                self.find_frees(coords)
-            elif coords in self.mine_coords:
+            if coords in self.mine_coords:
                 self.c.create_image(x * self.cell_w + self.cell_w / 2,
                                     y * self.cell_h + self.cell_w / 2,
                                     image=self.mine_image, tags='mine')
@@ -176,19 +167,32 @@ class GameApp:
                 self.show_all_mines()
                 self.header.configure(text='You Lost...\nScore: '
                                            + str(self.score))
+                return -1
             else:
-                self.c.itemconfigure(self.buttons[x][y], fill='blue')
-                self.c.create_text(x*self.cell_w + self.cell_w/2,
-                                   y*self.cell_h + self.cell_w/2,
-                                   text=mine_num, fill='white',
-                                   tags='mine_num')
-            if first_run and len(self.visited) == (self.size ** 2 -
-                                                   self.mine_count):
-                self.end_game = True
-                self.show_all_mines()
-                self.score += 1
-                self.header.configure(text='You Won!\nScore: '
-                                           + str(self.score))
+                mine_num = 0
+                for a, b in self.neighbor_gen(x, y):
+                    if (a, b) in self.mine_coords:
+                        mine_num += 1
+                self.visited.add(coords)
+                
+                if mine_num == 0:
+                    self.c.itemconfigure(self.buttons[x][y], fill='dark gray')
+                    if first_run:
+                        self.find_frees(coords)
+                else:
+                    self.c.itemconfigure(self.buttons[x][y], fill='blue')
+                    self.c.create_text(x*self.cell_w + self.cell_w/2,
+                                       y*self.cell_h + self.cell_w/2,
+                                       text=mine_num, fill='white',
+                                       tags='mine_num')
+                if len(self.visited) == (self.size ** 2 - self.mine_count):
+                    self.end_game = True
+                    self.show_all_mines()
+                    self.score += 1
+                    self.header.configure(
+                        text='You Won!\nScore: ' + str(self.score)
+                    )
+                return mine_num
 
     def find_frees(self, coords):
         """
@@ -196,13 +200,16 @@ class GameApp:
         :param coords: (tuple) coordinates of the item clicked
         """
         x, y = coords
-        for dx in (x - 1, x, x + 1):
-            for dy in (y - 1, y, y + 1):
-                if dx in range(0, self.size) and dy in range(0, self.size) \
-                        and (dx, dy) not in self.mine_coords \
-                        and (dx, dy) not in self.visited:
-                    self.c.itemconfigure(self.buttons[dx][dy], fill='black')
-                    self.check_mine((dx, dy), False)
+        q = Queue()
+        q.put((x, y))
+        while not q.empty():
+            x, y = q.get()
+            for a, b in self.neighbor_gen(x, y):
+                self.visited.add((a, b))
+                if (a, b) not in self.mine_coords:
+                    mines = self.check_mine((a, b), False)
+                    if not mines:
+                        q.put((a, b))
 
     def show_all_mines(self):
         """
@@ -214,6 +221,14 @@ class GameApp:
                                 y * self.cell_h + self.cell_w / 2,
                                 image=self.mine_image, tags='mine')
             self.c.after(self.delay, self.show_all_mines)
+
+    def neighbor_gen(self, x, y):
+        """
+        Builds a generator to return the naighbors of a given space
+        """
+        return ((a, b) for a in (range(max(0, x-1), min(x+2, self.size)))
+                       for b in range(max(0, y-1), min(y+2, self.size))
+                       if (a, b) != (x, y) and (a, b) not in self.visited)
 
 
 def get_arguments():
@@ -254,8 +269,6 @@ def main():
     difficulty, size, debug, verbose = get_arguments()
     if verbose:
         print(f'Starting {difficulty} game with a grid of size {size}')
-    import sys
-    sys.setrecursionlimit(int(2.5*size**2))
     root = tk.Tk()
     app = GameApp(root, {'easy': 1, 'medium': 2, 'hard': 3}[difficulty],
                   size, debug)
